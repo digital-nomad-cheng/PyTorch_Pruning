@@ -1,5 +1,6 @@
 import argparse
 from heapq import nsmallest
+from operator import itemgetter
 
 import torch
 import torch.nn as nn
@@ -49,6 +50,7 @@ class Model(torch.nn.Module):
                 nn.Dropout(p=0.5),
                 nn.Linear(25088, 2),
         )
+        
     
     def forward(self, x):
         x = self.features(x)
@@ -71,7 +73,7 @@ class FilterPrunner:
         self.grad_index = 0
         self.activation_to_layer = {}
 
-        activation_index = []
+        activation_index = 0
         for layer, (name, module) in enumerate(self.model.features._modules.items()):
             x = module(x)
             if isinstance(module, torch.nn.modules.conv.Conv2d):
@@ -108,6 +110,7 @@ class FilterPrunner:
     def normalize_ranks_per_layer(self):
         for i in self.filter_ranks:
             v = torch.abs(self.filter_ranks[i])
+            v = v.cpu()
             v = v / np.sqrt(torch.sum(v*v))
             self.filter_ranks[i] = v.cpu()
     
@@ -160,7 +163,7 @@ class PrunningFineTuner:
 
     def train(self, optimizer = None, epochs=10):
         if optimizer is None:
-            optimizer = optim.SGD(model.classifier.parameters(), lr = 0.0001, momentum=0.9)
+            optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9)
 
         for i in range(epochs):
             print("Epoch:", i)
@@ -178,7 +181,7 @@ class PrunningFineTuner:
 
         if rank_filters:
             output = self.prunner.forward(input)
-            sekf.criterion(output, Variable(label)).backward()
+            self.criterion(output, Variable(label)).backward()
         else:
             self.criterion(self.model(input), Variable(label)).backward()
             optimizer.step()
@@ -191,15 +194,15 @@ class PrunningFineTuner:
         self.prunner.reset()
         self.train_epoch(rank_filters=True)
         self.prunner.normalize_ranks_per_layer()
-        return self.prunner.get_prunning_plan(num_filter_to_prune)
+        return self.prunner.get_prunning_plan(num_filters_to_prune)
 
     
     def total_num_filters(self):
         filters = 0
         for name, module in self.model.features._modules.items():
-            if isinstance(module, torch.nn.modules.conv.Conv2d):
-                fitlers = filters + module.out_channels
-        
+            if isinstance(module, torch.nn.modules.Conv2d):
+                filters = filters + module.out_channels
+         
         return filters
 
     def prune(self):
@@ -210,26 +213,28 @@ class PrunningFineTuner:
             param.requires_grad = True
         
         number_of_filters = self.total_num_filters()
-        num_filters_to_prune_per_iteration = 512
+        print("Total number of filters:", number_of_filters)
+        num_filters_to_prune_per_iteration = 50
         iterations = int(float(number_of_filters) / num_filters_to_prune_per_iteration)
 
         iterations = int(iterations * 2.0 / 3)
 
         print("Number of prunning iterations to reduce 67% filters", iterations)
         for _ in range(iterations):
-            print("Randking filters...")
+            print("Ranking filters...")
             prune_targets = self.get_candidates_to_prune(num_filters_to_prune_per_iteration)
             layers_prunned = {}
 
-            for layer_idnex, filter_index, in prune_targets:
+            for layer_index, filter_index, in prune_targets:
                 if layer_index not in layers_prunned:
                     layers_prunned[layer_index] = 0
                 layers_prunned[layer_index] = layers_prunned[layer_index]+1
-            print("Layer that will be prunned", layer_prunned)
+            print("Prunning targets:", prune_targets)
+            print("Layer that will be prunned", layers_prunned)
             print("Prunning filters...")
             model = self.model.cpu()
-            for layer_index, fiter_index in prune_targets:
-                model = prune_vgg16_conv_layer(model, layer_index, filter_index, 
+            for layer_index, filter_index in prune_targets:
+                model = prune_conv_layer(model, layer_index, filter_index, 
                         use_cuda=args.use_cuda)
             self.model = model
 
@@ -240,13 +245,13 @@ class PrunningFineTuner:
             self.test()
             print("Fine tuning to recover from prunning iteration.")
             optimizer = optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.9)
-            self.train(optimizer, epoches=1)
+            self.train(optimizer, epochs=2)
 
         optimizer = optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.9)
         print("Finished. Going to fine tune the model a bit more")
-        self.train(optimizer, epochs=1)
+        self.train(optimizer, epochs=2)
         model = self.model
-        torch.save(model.state_dict, "model_prunned")
+        torch.save(model.state_dict, "model_prunned/cat_vs_dog.pth")
 
 
 def get_args():
@@ -264,15 +269,18 @@ def get_args():
 
     return args
 
+
+
 if __name__ == "__main__":
-    # model = MobileNet()
-    # summary(model.cuda(), (3, 224, 224))
+    #model = MobileNet()
+    #summary(model.cuda(), (3, 224, 224))
     
     args = get_args()
     if args.train:
-        model = Model()
+        # model = Model()
+        model = Model1()
     elif args.prune:
-        model = torch.load('model', map_location='cpu')
+        model = torch.load('model/cat_vs_dog.pth', map_location='cpu')
 
     if args.use_cuda:
         model = model.cuda()
@@ -281,7 +289,7 @@ if __name__ == "__main__":
     
     if args.train:
         fine_tuner.train(epochs=10)
-        torch.save(model, "model/vgg.pth")
+        torch.save(model, "model/cat_vs_dog.pth")
     elif args.prune:
         fine_tuner.prune()
 
