@@ -161,7 +161,7 @@ class PrunningFineTuner:
 
         self.model.train()
 
-    def train(self, optimizer = None, epochs=10):
+    def train(self, optimizer = None, epochs=100):
         if optimizer is None:
             optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9)
 
@@ -245,11 +245,11 @@ class PrunningFineTuner:
             self.test()
             print("Fine tuning to recover from prunning iteration.")
             optimizer = optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.9)
-            self.train(optimizer, epochs=2)
+            self.train(optimizer, epochs=10)
 
         optimizer = optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.9)
         print("Finished. Going to fine tune the model a bit more")
-        self.train(optimizer, epochs=2)
+        self.train(optimizer, epochs=10)
         model = self.model
         torch.save(model.state_dict, "model_prunned/cat_vs_dog.pth")
 
@@ -288,7 +288,7 @@ if __name__ == "__main__":
     fine_tuner = PrunningFineTuner(args.train_path, args.test_path, model)
     
     if args.train:
-        fine_tuner.train(epochs=10)
+        fine_tuner.train(epochs=100)
         torch.save(model, "model/cat_vs_dog.pth")
     elif args.prune:
         fine_tuner.prune()

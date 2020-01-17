@@ -50,31 +50,51 @@ def prune_conv_layer(model, layer_index, filter_index, use_cuda=False):
     print("filter index:", filter_index)
     
     # if its the last channel of weight
-    if filter_index == old_conv_weights.shape[0]:
-        new_conv_weights[:, :, :, :] = old_conv_weights[:filter_index-1, :, :, :]
-    else:
-        new_conv_weights[:filter_index, :, :, :] = old_conv_weights[:filter_index, :, :, :]
-        new_conv_weights[filter_index:, :, :, :] = old_conv_weights[filter_index+1:, :, :, :]
-    
+    # if filter_index == old_conv_weights.shape[0]:
+    #    new_conv_weights[:, :, :, :] = old_conv_weights[:filter_index-1, :, :, :]
+    # else:
+    new_conv_weights[:filter_index, :, :, :] = old_conv_weights[:filter_index, :, :, :]
+    new_conv_weights[filter_index:, :, :, :] = old_conv_weights[filter_index+1:, :, :, :]
     new_conv.weight.data = torch.from_numpy(new_conv_weights)
-    if use_cuda:
-        new_conv.weight.data = new_conv.weight.data.cuda()
-
+    
+    # prune batchnorm layer
     bias_numpy = conv.bias.data.cpu().numpy()
     bias = np.zeros(shape=(bias_numpy.shape[0] - 1), dtype=np.float32)
     bias[:filter_index] = bias_numpy[:filter_index]
     bias[filter_index:] = bias_numpy[filter_index+1:]
     new_conv.bias.data = torch.from_numpy(bias)
-    if use_cuda:
-        new_conv.bias.data = new_conv.bias.data.cuda()
     
     old_norm_weights = norm.weight.data.cpu().numpy()
     new_norm_weights = new_norm.weight.data.cpu().numpy()
-    # print(old_norm_weights.shape)
-    # print(new_norm_weights.shape)
     new_norm_weights[:filter_index] = old_norm_weights[:filter_index]
     new_norm_weights[filter_index:] = old_norm_weights[filter_index+1:]
     new_norm.weight.data = torch.from_numpy(new_norm_weights)
+    
+    old_norm_bias = norm.bias.data.cpu().numpy()
+    new_norm_bias = new_norm.bias.data.cpu().numpy()
+    new_norm_bias[:filter_index] = old_norm_bias[:filter_index]
+    new_norm_bias[filter_index:] = old_norm_bias[filter_index+1:]
+    new_norm.bias.data = torch.from_numpy(new_norm_bias)
+
+    old_norm_rmean = norm.running_mean.data.cpu().numpy()
+    new_norm_rmean = new_norm.running_mean.data.cpu().numpy()
+    new_norm_rmean[:filter_index] = old_norm_rmean[:filter_index]
+    new_norm_rmean[filter_index:] = old_norm_rmean[filter_index+1:]
+    new_norm.running_mean.data = torch.from_numpy(new_norm_rmean)
+
+    old_norm_rvar = norm.running_var.data.cpu().numpy()
+    new_norm_rvar = new_norm.running_var.data.cpu().numpy()
+    new_norm_rvar[:filter_index] = old_norm_rvar[:filter_index]
+    new_norm_rvar[filter_index:] = old_norm_rvar[filter_index+1:]
+    new_norm.running_var.data = torch.from_numpy(new_norm_rvar)
+      
+    if use_cuda:
+        new_conv.weight.data = new_conv.weight.data.cuda()
+        new_conv.bias.data = new_conv.bias.data.cuda()
+        new_norm.weight.data = new_norm.weight.data.cuda()
+        new_norm.bias.data = new_norm.bias.data.cuda()
+        new_norm.running_mean = new_norm.running_mean.cuda()
+        new_norm.running_var  = new_norm.running_var.cuda()
 
 
     if not next_conv is None:
